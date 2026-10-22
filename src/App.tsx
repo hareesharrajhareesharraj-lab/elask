@@ -389,7 +389,13 @@ export default function App() {
     }
   }, [messages, languageMode, ownerProfile.ownerName, enableSearchGrounding, isSoundMuted, ttsVoice, autoWakeEnabled]);
 
-  // Initialize WakeWordEngine
+  // Keep mutable ref to processQuery so WakeWordEngine never needs recreation
+  const processQueryRef = useRef(processQuery);
+  useEffect(() => {
+    processQueryRef.current = processQuery;
+  }, [processQuery]);
+
+  // Initialize single WakeWordEngine on mount (never recreates on message updates)
   useEffect(() => {
     const lang =
       languageMode === 'tamil'
@@ -425,11 +431,11 @@ export default function App() {
         }
       },
       onWakeDetected: (_prefilled) => {
-        setInterimTranscript('Wake word "ELASK" recognized. Listening for command...');
+        setInterimTranscript('Wake phrase "ELASK" recognized. Listening for command...');
       },
       onCommandCaptured: (command) => {
         if (command && command.trim()) {
-          processQuery(command.trim(), true);
+          processQueryRef.current(command.trim(), true);
         }
       },
       onInterimTranscript: (interim) => {
@@ -450,8 +456,9 @@ export default function App() {
 
     wakeWordEngineRef.current = engine;
 
-    // If auto wake is enabled, start immediately on app open!
-    if (autoWakeEnabled) {
+    // If auto wake is enabled or previously granted, start immediately on app open
+    const wasAutoActive = typeof window !== 'undefined' && localStorage.getItem('elask_auto_listen') === 'true';
+    if (wasAutoActive || autoWakeEnabled) {
       engine.enableAutoListen(lang).catch((e) => {
         console.warn('Auto Listen start notice:', e);
       });
@@ -460,7 +467,40 @@ export default function App() {
     return () => {
       engine.stop();
     };
-  }, [languageMode, autoWakeEnabled, processQuery, silenceTimeoutMs]);
+  }, []); // Run strictly once on mount
+
+  // Sync language changes dynamically to the active engine
+  useEffect(() => {
+    const lang =
+      languageMode === 'tamil'
+        ? 'ta-IN'
+        : languageMode === 'english'
+        ? 'en-US'
+        : 'en-US';
+    wakeWordEngineRef.current?.setLanguage(lang);
+  }, [languageMode]);
+
+  // Sync silence timeout dynamically
+  useEffect(() => {
+    wakeWordEngineRef.current?.setSilenceTimeout(silenceTimeoutMs);
+  }, [silenceTimeoutMs]);
+
+  // Sync autoWakeEnabled changes
+  useEffect(() => {
+    if (autoWakeEnabled) {
+      if (wakeWordEngineRef.current?.isPermissionGranted()) {
+        const lang =
+          languageMode === 'tamil'
+            ? 'ta-IN'
+            : languageMode === 'english'
+            ? 'en-US'
+            : 'en-US';
+        wakeWordEngineRef.current.enableAutoListen(lang);
+      }
+    } else {
+      wakeWordEngineRef.current?.stopListening();
+    }
+  }, [autoWakeEnabled, languageMode]);
 
   // Connect to Windows Companion and Subscribe to Background Wake Events
   useEffect(() => {
@@ -919,15 +959,12 @@ export default function App() {
 
             {/* Glowing Centerpiece Orb with Rotating Rings & "ELASK" Typography */}
             <HudOrb
-              state={state}
-              wakeWordState={wakeWordState}
-              autoWakeEnabled={autoWakeEnabled}
+              voiceState={voiceState}
+              onEnableAutoListen={handleEnableAutoListen}
+              onStopListening={handleStopListening}
+              onResumeListening={handleResumeListening}
               onClick={handleMicAction}
-              onTogglePauseWake={handleTogglePauseWake}
-              onStopCapture={handleEmergencyStop}
-              isListening={isListening && wakeWordState !== 'PAUSED'}
               audioLevel={audioLevel}
-              wakeWordMode={autoWakeEnabled || wakeWordMode}
               silenceTimeoutMs={silenceTimeoutMs}
             />
 
@@ -975,6 +1012,22 @@ export default function App() {
                 </span>
               )}
             </div>
+
+            {/* Microphone Status Notice / Error Banner */}
+            {micStatusMessage && (
+              <div className="mt-2.5 px-3.5 py-2 rounded-lg bg-red-950/80 border border-red-500/60 text-red-200 text-xs font-mono-tech flex items-center justify-between gap-3 max-w-md shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span className="leading-snug">{micStatusMessage}</span>
+                </div>
+                <button
+                  onClick={() => setMicStatusMessage('')}
+                  className="px-2 py-0.5 rounded bg-red-900/60 hover:bg-red-800 text-white text-[10px] font-bold shrink-0 transition-colors"
+                >
+                  DISMISS
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Conversation Transcript & Response Feed */}
@@ -1178,7 +1231,7 @@ export default function App() {
           if (enabled) {
             handleEnableAutoWake();
           } else {
-            wakeWordEngineRef.current?.pause();
+            wakeWordEngineRef.current?.stopListening();
           }
         }}
         companionState={companionState}

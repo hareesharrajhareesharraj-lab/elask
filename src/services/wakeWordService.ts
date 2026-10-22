@@ -31,28 +31,29 @@ export interface WakeWordCallbacks {
 
 // Common variations and phonetic spellings of "ELASK" in English and Tamil
 const WAKE_WORD_PATTERNS = [
-  /\belask\b/i,
-  /\bhey elask\b/i,
-  /\bok elask\b/i,
-  /\bhi elask\b/i,
-  /\bhello elask\b/i,
-  /\belaask\b/i,
-  /\belaska\b/i,
-  /\be-lask\b/i,
-  /\bilask\b/i,
-  /\balask\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?elask\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?elaask\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?elaska\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?alask\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?ilask\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?e-lask\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?elias\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?elox\b/i,
+  /\b(hey\s+|ok\s+|hi\s+|hello\s+)?alexa\b/i,
+  // Tamil variations of "ELASK"
   /ஏலாஸ்க்/i,
   /இலாஸ்க்/i,
   /எலாஸ்க்/i,
   /இலஸ்க்/i,
   /எலஸ்க்/i,
+  /ஏலஸ்க்/i,
+  /ஈலாஸ்க்/i,
+  /எலக்ஸ்/i,
+  /ஏலக்ஸ்/i,
 ];
 
 const EMERGENCY_STOP_PATTERNS = [
-  /\belask stop\b/i,
-  /\bstop elask\b/i,
-  /\bstop stop\b/i,
-  /\bemergency stop\b/i,
+  /\b(elask\s+stop|stop\s+elask|stop\s+stop|emergency\s+stop|stop\s+listening)\b/i,
   /நிறுத்து/i,
   /போதும்/i,
   /நில்/i,
@@ -79,13 +80,13 @@ export class WakeWordEngine {
   private silenceTimeoutMs: number = 1200;
   private captureSilenceTimer: any = null;
 
-  // 10-second no-speech watchdog timer
-  private noSpeechTimer: any = null;
-  private static readonly NO_SPEECH_TIMEOUT_MS = 10000;
+  // Idle wake timer: if user says "ELASK" but says no follow-up command
+  private idleWakeTimer: any = null;
 
   // Deduplication & speech state tracking
   private hasSubmittedCurrentUtterance: boolean = false;
   private currentCapturedText: string = '';
+  private commandStartIndex: number = 0;
   private currentLanguage: string = 'en-US';
   private autoListenActive: boolean = false;
   private micPermissionGranted: boolean = false;
@@ -94,9 +95,13 @@ export class WakeWordEngine {
     this.callbacks = callbacks;
     this.setSilenceTimeout(silenceTimeoutMs);
     this.initSpeechRecognition();
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    }
   }
 
-  // Adjust silence delay between 700ms and 1800ms
+  // Adjust silence delay between 700ms and 1800ms (default 1.2s)
   setSilenceTimeout(ms: number) {
     this.silenceTimeoutMs = Math.max(700, Math.min(1800, ms));
   }
@@ -125,37 +130,56 @@ export class WakeWordEngine {
     );
   }
 
+  setLanguage(lang: string) {
+    this.currentLanguage = lang;
+    if (this.recognition) {
+      this.recognition.lang = lang;
+      if (this.isRunning && !this.isPausedByUser && !this.isSpeaking) {
+        try {
+          this.recognition.abort();
+        } catch (_e) {}
+      }
+    }
+  }
+
+  private handleVisibilityChange = () => {
+    if (typeof document === 'undefined') return;
+    if (!document.hidden && this.autoListenActive && !this.isPausedByUser && !this.isSpeaking && !this.isDestroyed) {
+      if (!this.isRunning && !this.isStarting) {
+        this.safeStart();
+      }
+    }
+  };
+
   private setState(newState: VoiceInputState, message?: string) {
     this.state = newState;
     this.callbacks.onStateChange(newState, message);
   }
 
-  // 10-second watchdog: If user said "ELASK" but said no follow-up command
-  private startNoSpeechWatchdog() {
-    this.clearNoSpeechWatchdog();
-    this.noSpeechTimer = setTimeout(() => {
-      if (this.state === 'HEARING COMMAND' && !this.hasSubmittedCurrentUtterance) {
-        console.log('[VOICE] 10s timeout in HEARING COMMAND with no follow-up speech.');
-        const timeoutMsg = 'No command detected after "ELASK". Returned to wake listening.';
-        
+  // 3.5-second timer: If user said "ELASK" alone with no follow-up command
+  private startIdleWakeTimer() {
+    this.clearIdleWakeTimer();
+    this.idleWakeTimer = setTimeout(() => {
+      if (this.state === 'HEARING COMMAND' && !this.hasSubmittedCurrentUtterance && !this.currentCapturedText.trim()) {
+        console.log('[VOICE] No command detected after "ELASK". Returned to wake listening.');
         if (this.callbacks.onNoSpeechTimeout) {
-          this.callbacks.onNoSpeechTimeout(timeoutMsg);
+          this.callbacks.onNoSpeechTimeout('No command detected after "ELASK". Returned to listening for ELASK.');
         }
 
-        // Return safely to listening for ELASK
+        // Return safely to listening for ELASK without submitting
         this.currentCapturedText = '';
         if (this.callbacks.onInterimTranscript) {
           this.callbacks.onInterimTranscript('');
         }
         this.rearm();
       }
-    }, WakeWordEngine.NO_SPEECH_TIMEOUT_MS);
+    }, 3500);
   }
 
-  private clearNoSpeechWatchdog() {
-    if (this.noSpeechTimer) {
-      clearTimeout(this.noSpeechTimer);
-      this.noSpeechTimer = null;
+  private clearIdleWakeTimer() {
+    if (this.idleWakeTimer) {
+      clearTimeout(this.idleWakeTimer);
+      this.idleWakeTimer = null;
     }
   }
 
@@ -168,7 +192,7 @@ export class WakeWordEngine {
 
     if (!SpeechRecognition) {
       console.warn('[VOICE] Web Speech Recognition not supported in this browser.');
-      this.setState('ENABLE MICROPHONE', 'Speech recognition not supported in this browser. Please use Chrome, Edge, or the Windows Companion.');
+      this.setState('ENABLE MICROPHONE', 'Web Speech API is not supported in this browser. Please use Chrome or Edge, or use text input.');
       if (this.callbacks.onError) {
         this.callbacks.onError('Web Speech API unsupported. Use Chrome, Edge, or typed input.');
       }
@@ -179,6 +203,7 @@ export class WakeWordEngine {
     this.recognition.continuous = true;
     this.recognition.interimResults = true;
     this.recognition.maxAlternatives = 2;
+    this.recognition.lang = this.currentLanguage;
 
     this.recognition.onstart = () => {
       this.isRunning = true;
@@ -198,19 +223,19 @@ export class WakeWordEngine {
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         const item = event.results[i][0];
         if (event.results[i].isFinal) {
-          final += item.transcript;
+          final += item.transcript + ' ';
         } else {
           interim += item.transcript;
         }
       }
 
-      const rawText = (final || interim).trim();
+      const rawText = (final ? `${final} ${interim}` : interim).trim();
       if (!rawText) return;
 
       // Emergency stop check: instantly aborts and enters PAUSED
       for (const pattern of EMERGENCY_STOP_PATTERNS) {
         if (pattern.test(rawText)) {
-          this.clearNoSpeechWatchdog();
+          this.clearIdleWakeTimer();
           if (this.captureSilenceTimer) {
             clearTimeout(this.captureSilenceTimer);
             this.captureSilenceTimer = null;
@@ -229,27 +254,28 @@ export class WakeWordEngine {
           console.log('[VOICE] Wake phrase "ELASK" recognized locally:', rawText);
           soundFX.playActivate();
 
-          // Extract any command spoken in the same breath (e.g., "ELASK what is the weather")
+          this.commandStartIndex = event.resultIndex;
           const commandAfterWake = this.stripWakeWord(rawText);
 
           this.setState('HEARING COMMAND', 'Wake word recognized. Listening for command...');
           this.hasSubmittedCurrentUtterance = false;
-          this.currentCapturedText = commandAfterWake || '';
 
           if (this.callbacks.onWakeDetected) {
             this.callbacks.onWakeDetected(commandAfterWake || undefined);
           }
 
-          if (commandAfterWake && this.callbacks.onInterimTranscript) {
-            this.callbacks.onInterimTranscript(commandAfterWake);
-          }
-
-          // Start 10-second no-speech watchdog
-          this.startNoSpeechWatchdog();
-
-          // If a command was already spoken in the same breath, arm silence timer
-          if (commandAfterWake) {
+          if (commandAfterWake && commandAfterWake.length >= 2) {
+            this.currentCapturedText = commandAfterWake;
+            if (this.callbacks.onInterimTranscript) {
+              this.callbacks.onInterimTranscript(commandAfterWake);
+            }
             this.resetSilenceTimer();
+          } else {
+            this.currentCapturedText = '';
+            if (this.callbacks.onInterimTranscript) {
+              this.callbacks.onInterimTranscript('');
+            }
+            this.startIdleWakeTimer();
           }
         }
         // If wake word is NOT present, ignore idle speech completely!
@@ -259,9 +285,16 @@ export class WakeWordEngine {
       // STATE 2: HEARING COMMAND
       // Wake word was heard; now capturing spoken Tamil, English, or Tanglish command
       if (this.state === 'HEARING COMMAND') {
-        this.clearNoSpeechWatchdog();
+        this.clearIdleWakeTimer();
 
-        const cleanText = this.stripWakeWord(rawText);
+        // Accumulate text since the command started
+        let accumulated = '';
+        for (let i = this.commandStartIndex; i < event.results.length; ++i) {
+          accumulated += event.results[i][0].transcript + ' ';
+        }
+        accumulated = accumulated.trim();
+
+        const cleanText = this.stripWakeWord(accumulated || rawText);
         const isMeaningful = cleanText.length >= 2 && /[a-zA-Z0-9\u0B80-\u0BFF]/.test(cleanText);
 
         if (isMeaningful) {
@@ -272,7 +305,7 @@ export class WakeWordEngine {
           }
 
           // Reset silence timer on each new speech chunk.
-          // Tamil speech has natural pauses; waiting for 1.2s prevents truncation.
+          // Tamil & Tanglish speech has natural pauses; 1.2s silence prevents premature submission.
           this.resetSilenceTimer();
         }
       }
@@ -314,7 +347,7 @@ export class WakeWordEngine {
         if (this.restartTimer) clearTimeout(this.restartTimer);
         this.restartTimer = setTimeout(() => {
           this.safeStart();
-        }, 250);
+        }, 200);
       }
     };
   }
@@ -347,7 +380,7 @@ export class WakeWordEngine {
     for (const pattern of WAKE_WORD_PATTERNS) {
       cleaned = cleaned.replace(pattern, ' ');
     }
-    return cleaned.replace(/\s+/g, ' ').trim();
+    return cleaned.replace(/^[,\s.!?-]+|[,\s.!?-]+$/g, '').replace(/\s+/g, ' ').trim();
   }
 
   // Resets silence timer. After silenceTimeoutMs (1.2s) of silence, auto-submits once.
@@ -389,9 +422,16 @@ export class WakeWordEngine {
       clearTimeout(this.captureSilenceTimer);
       this.captureSilenceTimer = null;
     }
-    this.clearNoSpeechWatchdog();
+    this.clearIdleWakeTimer();
 
-    this.setState('PROCESSING', 'Submitting command to Gemini Live...');
+    // Abort speech recognition during processing to prevent hearing itself or background noise
+    if (this.recognition && this.isRunning) {
+      try {
+        this.recognition.abort();
+      } catch (_e) {}
+    }
+
+    this.setState('PROCESSING', 'Submitting command to Gemini...');
     this.callbacks.onCommandCaptured(command);
     this.currentCapturedText = '';
   }
@@ -471,8 +511,8 @@ export class WakeWordEngine {
    * 1. Requests browser microphone permission once.
    * 2. After permission is granted, starts listening for "ELASK" automatically whenever the page is open.
    */
-  async enableAutoListen(lang: string = 'en-US'): Promise<boolean> {
-    this.currentLanguage = lang;
+  async enableAutoListen(lang?: string): Promise<boolean> {
+    if (lang) this.currentLanguage = lang;
     this.isPausedByUser = false;
     this.autoListenActive = true;
 
@@ -485,7 +525,7 @@ export class WakeWordEngine {
     }
 
     if (this.recognition) {
-      this.recognition.lang = lang;
+      this.recognition.lang = this.currentLanguage;
       this.safeStart();
     }
 
@@ -499,11 +539,12 @@ export class WakeWordEngine {
    * Directly enters "HEARING COMMAND" without needing the wake phrase "ELASK",
    * with the exact same automatic 1.2s silence auto-submit.
    */
-  async startManualListening(lang: string = 'en-US'): Promise<boolean> {
-    this.currentLanguage = lang;
+  async startManualListening(lang?: string): Promise<boolean> {
+    if (lang) this.currentLanguage = lang;
     this.isPausedByUser = false;
     this.hasSubmittedCurrentUtterance = false;
     this.currentCapturedText = '';
+    this.commandStartIndex = 0;
 
     if (!this.micPermissionGranted || !this.mediaStream) {
       const granted = await this.requestMicPermission();
@@ -517,11 +558,11 @@ export class WakeWordEngine {
     soundFX.playActivate();
 
     if (this.recognition) {
-      this.recognition.lang = lang;
+      this.recognition.lang = this.currentLanguage;
       this.safeStart();
     }
 
-    this.startNoSpeechWatchdog();
+    this.startIdleWakeTimer();
     return true;
   }
 
@@ -549,13 +590,14 @@ export class WakeWordEngine {
 
   // Return cleanly to "LISTENING FOR ELASK"
   rearm() {
-    this.clearNoSpeechWatchdog();
+    this.clearIdleWakeTimer();
     if (this.captureSilenceTimer) {
       clearTimeout(this.captureSilenceTimer);
       this.captureSilenceTimer = null;
     }
     this.hasSubmittedCurrentUtterance = false;
     this.currentCapturedText = '';
+    this.commandStartIndex = 0;
 
     if (this.autoListenActive && !this.isPausedByUser) {
       this.setState('LISTENING FOR ELASK', 'Listening for wake phrase "ELASK"');
@@ -570,7 +612,7 @@ export class WakeWordEngine {
   // Immediate Stop Listening control: switches to PAUSED
   stopListening() {
     this.isPausedByUser = true;
-    this.clearNoSpeechWatchdog();
+    this.clearIdleWakeTimer();
     if (this.captureSilenceTimer) {
       clearTimeout(this.captureSilenceTimer);
       this.captureSilenceTimer = null;
@@ -605,7 +647,11 @@ export class WakeWordEngine {
     this.isDestroyed = true;
     this.autoListenActive = false;
     this.isPausedByUser = false;
-    this.clearNoSpeechWatchdog();
+    this.clearIdleWakeTimer();
+
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    }
 
     if (this.captureSilenceTimer) {
       clearTimeout(this.captureSilenceTimer);
