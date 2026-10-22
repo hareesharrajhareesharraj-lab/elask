@@ -1,11 +1,33 @@
 export type AssistantState = 
   | 'READY' 
+  | 'ARMED'
   | 'LISTENING' 
   | 'THINKING' 
   | 'SPEAKING' 
   | 'EXECUTING' 
   | 'PAUSED' 
   | 'NEEDS_SETUP';
+
+export type VoiceInputState =
+  | 'ENABLE MICROPHONE'
+  | 'LISTENING FOR ELASK'
+  | 'HEARING COMMAND'
+  | 'PROCESSING'
+  | 'PAUSED';
+
+export type WakeWordState =
+  | 'OFF'
+  | 'ENABLE MICROPHONE'
+  | 'LISTENING FOR ELASK'
+  | 'HEARING COMMAND'
+  | 'ARMED'
+  | 'WAKE_DETECTED'
+  | 'CAPTURING'
+  | 'PROCESSING'
+  | 'SPEAKING'
+  | 'PAUSED'
+  | 'MIC_DENIED'
+  | 'MIC_ERROR';
 
 export type LanguageMode = 'auto' | 'tamil' | 'english' | 'tanglish';
 
@@ -53,9 +75,11 @@ export interface ApprovedApp {
   id: string;
   name: string;
   aliases: string[];
-  command: string;
+  command?: string;
   category?: string;
   iconName?: string;
+  enabled?: boolean;
+  description?: string;
 }
 
 export interface ActivityLogItem {
@@ -83,4 +107,7 @@ export interface CompanionState {
   token: string;
   os?: string;
   latencyMs?: number;
+  wakeListening?: boolean;
+  lastWakeDetected?: string;
+  detectedCount?: number;
 }

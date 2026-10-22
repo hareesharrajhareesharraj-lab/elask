@@ -13,7 +13,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { CompanionState, LanguageMode } from '../types';
+import { CompanionState, LanguageMode, WakeWordState, VoiceInputState } from '../types';
 
 interface TelemetryBarProps {
   companionState: CompanionState;
@@ -22,6 +22,11 @@ interface TelemetryBarProps {
   isCameraActive: boolean;
   isSoundMuted: boolean;
   languageMode: LanguageMode;
+  autoWakeEnabled: boolean;
+  wakeWordState?: WakeWordState;
+  voiceState?: VoiceInputState;
+  onOpenAutoWakeSetup: () => void;
+  onTogglePauseWake: () => void;
   onLanguageChange: (lang: LanguageMode) => void;
   onOpenSettings: () => void;
   onOpenActivityLog: () => void;
@@ -38,6 +43,11 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
   isCameraActive,
   isSoundMuted,
   languageMode,
+  autoWakeEnabled,
+  wakeWordState,
+  voiceState,
+  onOpenAutoWakeSetup,
+  onTogglePauseWake,
   onLanguageChange,
   onOpenSettings,
   onOpenActivityLog,
@@ -96,8 +106,73 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
           </span>
         </button>
 
+        {/* Auto Listen Setup Button or Canonical Status Badge */}
+        {voiceState === 'ENABLE MICROPHONE' || !autoWakeEnabled ? (
+          <button
+            onClick={onOpenAutoWakeSetup}
+            className="flex items-center gap-1.5 px-3 py-1 rounded bg-gradient-to-r from-cyan-500 to-sky-400 hover:from-cyan-400 hover:to-sky-300 text-slate-950 font-orbitron font-bold text-[11px] shadow-[0_0_12px_rgba(0,240,255,0.6)] animate-pulse transition-all active:scale-95"
+            title="Setup hands-free auto-listening for 'ELASK'"
+          >
+            <Mic className="w-3.5 h-3.5" />
+            <span>ENABLE AUTO LISTEN</span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <div
+              className={`flex items-center gap-1 px-2.5 py-1 rounded border text-[11px] font-mono-tech ${
+                voiceState === 'PAUSED' || wakeWordState === 'PAUSED'
+                  ? 'bg-amber-950/60 border-amber-500/60 text-amber-300'
+                  : voiceState === 'HEARING COMMAND' || wakeWordState === 'CAPTURING'
+                  ? 'bg-amber-950/80 border-amber-400 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.4)]'
+                  : voiceState === 'PROCESSING'
+                  ? 'bg-sky-950/80 border-sky-400 text-sky-200'
+                  : 'bg-cyan-950/60 border-cyan-400/60 text-cyan-200 shadow-[0_0_8px_rgba(0,240,255,0.3)]'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  voiceState === 'PAUSED' || wakeWordState === 'PAUSED'
+                    ? 'bg-amber-400'
+                    : voiceState === 'HEARING COMMAND' || wakeWordState === 'CAPTURING'
+                    ? 'bg-amber-400 animate-ping'
+                    : voiceState === 'PROCESSING'
+                    ? 'bg-sky-400 animate-pulse'
+                    : 'bg-cyan-400 animate-pulse'
+                }`}
+              />
+              <span className="font-bold">
+                {voiceState ||
+                  (wakeWordState === 'PAUSED'
+                    ? 'PAUSED'
+                    : wakeWordState === 'CAPTURING'
+                    ? 'HEARING COMMAND'
+                    : 'LISTENING FOR ELASK')}
+              </span>
+            </div>
+
+            {/* Top Bar Quick Pause/Resume or Stop button */}
+            {voiceState === 'LISTENING FOR ELASK' || voiceState === 'HEARING COMMAND' ? (
+              <button
+                onClick={onTogglePauseWake}
+                className="px-2 py-1 rounded text-[10px] font-orbitron font-bold border bg-red-950/80 border-red-500/60 text-red-300 hover:bg-red-900 transition-all"
+                title="Stop listening [ESC]"
+              >
+                ⏹ STOP
+              </button>
+            ) : voiceState === 'PAUSED' ? (
+              <button
+                onClick={onTogglePauseWake}
+                className="px-2 py-1 rounded text-[10px] font-orbitron font-bold border bg-emerald-950/80 border-emerald-400 text-emerald-300 hover:bg-emerald-900 transition-all"
+                title="Resume auto-listening"
+              >
+                ▶ RESUME
+              </button>
+            ) : null}
+          </div>
+        )}
+
         {/* Real-time Clock */}
-        <div className="hidden md:flex items-center gap-1 text-cyan-300/80 tracking-widest">
+        <div className="hidden xl:flex items-center gap-1 text-cyan-300/80 tracking-widest text-[11px]">
           <span className="text-cyan-500">SYS.CLK:</span>
           <span className="font-bold">{timeStr || '00:00:00'}</span>
         </div>
@@ -128,17 +203,18 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
 
       {/* Right: Controls & Emergency Stop */}
       <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-        {/* Mic Toggle Button */}
+        {/* Mic Status & Toggle Button */}
         <button
           onClick={onToggleMic}
-          className={`p-1.5 rounded border transition-all ${
+          className={`flex items-center gap-1 px-2 py-1 rounded border transition-all text-[11px] ${
             isMicActive
               ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(0,240,255,0.4)]'
               : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-cyan-300'
           }`}
-          title={isMicActive ? 'Microphone Active (Listening)' : 'Microphone Inactive'}
+          title={isMicActive ? 'Microphone Active (Local Wake Armed)' : 'Microphone Inactive'}
         >
           {isMicActive ? <Mic className="w-3.5 h-3.5 text-cyan-400" /> : <MicOff className="w-3.5 h-3.5" />}
+          <span className="hidden sm:inline">{isMicActive ? 'MIC ON' : 'MIC OFF'}</span>
         </button>
 
         {/* Hand Gesture Camera Toggle */}

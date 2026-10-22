@@ -125,7 +125,8 @@ export const CompanionHelpModal: React.FC<CompanionHelpModalProps> = ({
                 <li>Launching desktop apps (Edge, Notepad, Calc, VS Code)</li>
                 <li>Opening URLs directly in Microsoft Edge</li>
                 <li>Simulating OS Zoom shortcuts (Ctrl+Plus / Ctrl+Minus)</li>
-                <li>True background wake-word listening when tab is closed</li>
+                <li>Offline background wake-word listening on "ELASK" when browser is closed</li>
+                <li>Clear console OFF switch: Press [S] in companion terminal to toggle</li>
               </ul>
             </div>
           </div>
@@ -153,7 +154,10 @@ export const CompanionHelpModal: React.FC<CompanionHelpModalProps> = ({
                 Or double-click <code>start-companion.bat</code> inside <code>companion/</code>.
               </li>
               <li>
-                Click <strong>"TEST BRIDGE"</strong> above. Once verified, all approved Windows actions execute instantly!
+                <strong>One-Time Local Pairing:</strong> Open <code>companion/companion-config.json</code> on your machine, copy the generated <code>authToken</code>, and paste it into <strong>Settings &gt; Windows Companion</strong>.
+              </li>
+              <li>
+                Click <strong>"TEST BRIDGE"</strong> above. Once verified, all approved Windows actions execute safely via <code>spawn</code>!
               </li>
             </ol>
           </div>
@@ -165,7 +169,7 @@ export const CompanionHelpModal: React.FC<CompanionHelpModalProps> = ({
               <span className="font-bold block text-emerald-300">
                 SECURITY & PRIVACY GUARANTEE:
               </span>
-              The companion binds strictly to <code>127.0.0.1</code> (localhost) and validates every incoming request with your <code>X-ELASK-TOKEN</code>. Arbitrary shell commands are strictly prohibited.
+              The companion binds strictly to <code>127.0.0.1</code> (localhost) and validates every incoming request with your per-install <code>X-ELASK-TOKEN</code>. Wildcard CORS is blocked; only exact allowed browser origins can connect. Arbitrary shell commands are strictly prohibited (only fixed app IDs via <code>spawn</code> with <code>shell: false</code>).
             </div>
           </div>
         </div>

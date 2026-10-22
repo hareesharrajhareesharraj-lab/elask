@@ -122,9 +122,9 @@ export const VoiceEnrollmentModal: React.FC<VoiceEnrollmentModalProps> = ({
           <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
           <div>
             <span className="font-bold block text-amber-300">
-              CONVENIENCE BIOMETRIC POLICY:
+              OPTIONAL & LOCAL ACOUSTIC ESTIMATION:
             </span>
-            Voice recognition is an on-device convenience feature and is not cryptographic identity proof. Raw voice recordings are never stored or transmitted. Sensitive Windows OS actions require on-screen confirmation or your PIN.
+            Voice-profile matching is completely optional and processed 100% locally on this device for conversational personalization. It is NOT cryptographic or secure identity proof. All sensitive Windows OS actions explicitly require manual on-screen confirmation or owner PIN verification.
           </div>
         </div>
 

@@ -254,11 +254,22 @@ export class SpeechListener {
   private recognition: any = null;
   public isListening: boolean = false;
   private onResultCallback?: (result: SpeechRecognitionResultPayload) => void;
+  private onAutoSubmitCallback?: (finalTranscript: string) => void;
   private onErrorCallback?: (error: string) => void;
   private onEndCallback?: () => void;
+  private onNoSpeechTimeoutCallback?: () => void;
   public targetLang: string = 'en-US';
 
-  constructor() {
+  // Configurable silence delay (0.7s - 1.8s, default 1.2s)
+  public silenceTimeoutMs: number = 1200;
+  private silenceTimer: any = null;
+  private noSpeechTimer: any = null;
+  private currentCapturedText: string = '';
+  private hasSubmitted: boolean = false;
+
+  constructor(silenceDelayMs: number = 1200) {
+    this.silenceTimeoutMs = Math.max(700, Math.min(1800, silenceDelayMs));
+
     if (typeof window !== 'undefined') {
       const SpeechRecognition =
         (window as any).SpeechRecognition ||
@@ -284,14 +295,23 @@ export class SpeechListener {
           }
 
           const currentText = (finalTranscript || interimTranscript).trim();
-          const lower = currentText.toLowerCase();
+          if (!currentText) return;
 
+          // Clear 10-second no-speech watchdog since speech was detected
+          if (this.noSpeechTimer) {
+            clearTimeout(this.noSpeechTimer);
+            this.noSpeechTimer = null;
+          }
+
+          const lower = currentText.toLowerCase();
           const containsWakeWord = lower.includes('elask') || lower.includes('இலாஸ்க்');
           const containsEmergencyStop =
             lower.includes('elask stop') ||
             lower.includes('stop elask') ||
             lower.includes('stop stop') ||
             lower.includes('நிறுத்து');
+
+          this.currentCapturedText = currentText;
 
           if (this.onResultCallback) {
             this.onResultCallback({
@@ -301,6 +321,24 @@ export class SpeechListener {
               containsEmergencyStop,
             });
           }
+
+          // Reset silence timer on every spoken chunk
+          if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer);
+          }
+
+          this.silenceTimer = setTimeout(() => {
+            if (this.isListening && !this.hasSubmitted) {
+              const text = this.currentCapturedText.trim();
+              if (text.length >= 2 && /[a-zA-Z0-9\u0B80-\u0BFF]/.test(text)) {
+                this.hasSubmitted = true;
+                if (this.onAutoSubmitCallback) {
+                  this.onAutoSubmitCallback(text);
+                }
+                this.stop();
+              }
+            }
+          }, this.silenceTimeoutMs);
         };
 
         this.recognition.onerror = (e: any) => {
@@ -312,17 +350,27 @@ export class SpeechListener {
 
         this.recognition.onend = () => {
           this.isListening = false;
+          if (this.noSpeechTimer) {
+            clearTimeout(this.noSpeechTimer);
+            this.noSpeechTimer = null;
+          }
           if (this.onEndCallback) this.onEndCallback();
         };
       }
     }
   }
 
+  setSilenceTimeout(ms: number) {
+    this.silenceTimeoutMs = Math.max(700, Math.min(1800, ms));
+  }
+
   start(
     lang: string,
     onResult: (result: SpeechRecognitionResultPayload) => void,
+    onAutoSubmit?: (finalTranscript: string) => void,
     onError?: (error: string) => void,
-    onEnd?: () => void
+    onEnd?: () => void,
+    onNoSpeechTimeout?: () => void
   ) {
     if (!this.recognition) {
       if (onError) onError('Browser SpeechRecognition not supported in this browser.');
@@ -330,21 +378,45 @@ export class SpeechListener {
     }
 
     this.onResultCallback = onResult;
+    this.onAutoSubmitCallback = onAutoSubmit;
     this.onErrorCallback = onError;
     this.onEndCallback = onEnd;
+    this.onNoSpeechTimeoutCallback = onNoSpeechTimeout;
     this.targetLang = lang;
+    this.hasSubmitted = false;
+    this.currentCapturedText = '';
 
     try {
       this.recognition.lang = lang;
       this.recognition.start();
       this.isListening = true;
       soundFX.playActivate();
+
+      // Start 10-second no-speech watchdog
+      if (this.noSpeechTimer) clearTimeout(this.noSpeechTimer);
+      this.noSpeechTimer = setTimeout(() => {
+        if (this.isListening && !this.hasSubmitted && !this.currentCapturedText.trim()) {
+          this.stop();
+          if (this.onNoSpeechTimeoutCallback) {
+            this.onNoSpeechTimeoutCallback();
+          }
+        }
+      }, 10000);
     } catch (_e) {
       // already started or busy
     }
   }
 
   stop() {
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    if (this.noSpeechTimer) {
+      clearTimeout(this.noSpeechTimer);
+      this.noSpeechTimer = null;
+    }
+
     if (this.recognition && this.isListening) {
       try {
         this.recognition.stop();

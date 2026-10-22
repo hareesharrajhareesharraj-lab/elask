@@ -441,6 +441,13 @@ app.post("/api/companion/dispatch", async (req: Request, res: Response) => {
     return;
   }
 
+  if (!token || typeof token !== "string") {
+    res.status(401).json({
+      error: "Companion pairing token is required. Please set your pairing token in Settings > Companion.",
+    });
+    return;
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -449,7 +456,7 @@ app.post("/api/companion/dispatch", async (req: Request, res: Response) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-ELASK-TOKEN": token || "ELASK-LOCAL-DEV-TOKEN",
+        "X-ELASK-TOKEN": token,
       },
       body: JSON.stringify(action),
       signal: controller.signal,
