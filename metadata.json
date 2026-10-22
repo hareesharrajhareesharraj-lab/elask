@@ -1,0 +1,6 @@
+{
+  "name": "ELASK - Bilingual Windows AI Assistant",
+  "description": "Bilingual Tamil and English personal AI assistant with futuristic holographic HUD, Windows companion integration, voice activation, and gesture control.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "elask-windows-companion",
+  "version": "1.0.0",
+  "description": "Local Windows Companion Service for ELASK AI Assistant",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "elask",
+    "assistant",
+    "windows",
+    "companion"
+  ],
+  "author": "ELASK Team",
+  "license": "Apache-2.0"
+}
